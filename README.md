@@ -71,9 +71,11 @@ reports/AI_trends_2026_20260419_143022.md
 
 ## Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `OPENAI_API_KEY` | LLM API key (Minimax) |
-| `TAVILY_API_KEY` | Search API key |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OPENAI_API_KEY` | LLM API key (Minimax) | - |
+| `OPENAI_BASE_URL` | LLM API endpoint | `https://api.minimaxi.com/v1` |
+| `OPENAI_MODEL_NAME` | LLM model name | `Minimax-M2.7` |
+| `TAVILY_API_KEY` | Tavily search API key | - |
 
 See `.env.example` for configuration.

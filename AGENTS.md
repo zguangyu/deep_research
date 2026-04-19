@@ -39,6 +39,18 @@ Model/endpoint is hardcoded to Minimax: `ChatOpenAI(model="Minimax-M2.7", base_u
 | `research_state.json` | Persists research progress (auto-created) |
 | `research.log` | Execution logs (auto-created) |
 | `reports/` | Output directory for generated reports |
+| `README.md` | Project documentation |
+| `.env.example` | Environment variables template |
+
+## Installation
+
+```bash
+# Install dependencies (requires uv)
+uv sync
+
+# Or install with pip
+pip install -e .
+```
 
 ## Architecture Notes
 
@@ -46,10 +58,11 @@ Model/endpoint is hardcoded to Minimax: `ChatOpenAI(model="Minimax-M2.7", base_u
 - Streaming mode with `stream_mode="messages"` and `subgraphs=True`
 - Subagent tool calls are identified by namespace prefix `tools:`
 - State tracks: status (running/completed/failed), messages, updated_at, error
+- Retry with exponential backoff: 3 attempts, 5s initial delay, doubling on each retry
+- Report cleaning: removes `<thinking>` tags, extra blank lines, intro boilerplate before first heading
 
 ## Important Conventions
 
 - Report filenames are sanitized (special chars stripped) with 50-char topic limit + timestamp
 - Chinese prompt hardcoded: "请帮我研究以下主题并撰写完整的研究报告"
-- Retry with exponential backoff (3 attempts, 5s initial delay)
 - Tool call logging distinguishes `main` vs `subagent` source
