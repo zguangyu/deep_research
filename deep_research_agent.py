@@ -1,13 +1,14 @@
 """
-Deep Research Agent - AI-powered research tool for generating Chinese reports.
+Deep Research Agent - AI-powered research tool for generating reports.
 
 This module provides an AI research agent that uses web search (Tavily) and
 large language models (Minimax M2.7) to research topics and generate
-comprehensive reports in Chinese. Features include streaming output,
-research state persistence, and automatic retry with exponential backoff.
+comprehensive reports. The report language automatically matches the user's
+input language. Features include streaming output, research state persistence,
+and automatic retry with exponential backoff.
 
 Example:
-    python deep_research_agent.py -t "人工智能发展趋势"
+    python deep_research_agent.py -t "AI trends 2026"
 """
 
 import os
@@ -28,6 +29,189 @@ import dotenv
 
 dotenv.load_dotenv()
 
+import locale
+
+
+def get_system_lang() -> str:
+    """Detect system language using cross-platform method.
+
+    Checks multiple sources in order:
+    1. LC_ALL, LC_MESSAGES, LANG environment variables
+    2. Windows registry (on Windows)
+    3. locale.getdefaultlocale() (fallback)
+    4. English default
+
+    Returns:
+        'zh' for Chinese, 'en' for English (default)
+    """
+    # Check environment variables first (most reliable cross-platform)
+    for var in ["LC_ALL", "LC_MESSAGES", "LANG"]:
+        lang = os.environ.get(var, "")
+        if lang:
+            lang = lang.lower()
+            if lang.startswith("zh"):
+                return "zh"
+            elif lang.startswith("en"):
+                return "en"
+
+    # Windows registry check
+    if sys.platform == "win32":
+        try:
+            import winreg
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Control Panel\International",
+                0,
+                winreg.KEY_READ
+            ) as key:
+                locale_name, _ = winreg.QueryValueEx(key, "LocaleName")
+                if locale_name.lower().startswith("zh"):
+                    return "zh"
+        except Exception:
+            pass
+
+    # Try locale.getdefaultlocale() as fallback
+    try:
+        loc = locale.getdefaultlocale()
+        if loc[0] and loc[0].lower().startswith("zh"):
+            return "zh"
+    except Exception:
+        pass
+
+    # Default to English
+    return "en"
+
+
+# Initialize system language
+SYSTEM_LANG = get_system_lang()
+
+
+# Internationalization strings
+I18N = {
+    "en": {
+        # CLI and UI
+        "app_title": "Deep Research Agent",
+        "research_topic": "Research topic",
+        "topic_placeholder": "Please enter your research topic",
+        "input_topic": "Topic: ",
+        "quit_message": "Thanks for using, goodbye!",
+        "invalid_topic": "Please enter a valid research topic.\n",
+        "existing_record": "Existing research record found (status: {status})",
+        "resume_prompt": "Resume previous research? (y/n): ",
+        "research_in_progress": "Research in progress:\n",
+        "updated_at": "Updated at: {time}",
+        "error_label": "Error: {error}",
+        "resume_requires_topic": "Resume requires specifying -t topic\n",
+        "topic_not_found": "No research record found for '{topic}', starting new research\n",
+        "starting_research": "Research topic: {topic}\n",
+        "resuming_from": "Resuming from last interruption (status: {status})\n",
+        "research_interrupted": "Research interrupted or empty\n",
+        "report_saved": "Report saved to: {filepath}\n",
+        "research_failed": "Research failed: {error}\n",
+        "use_resume_hint": "Research failed, use --resume to resume: python deep_research_agent.py -t \"{topic}\" --resume\n",
+        "program_interrupted": "Program interrupted, thanks for using, goodbye!\n",
+        "output_dir": "Output directory for reports",
+        "resume_help": "Resume previous research",
+        "list_help": "List in-progress research",
+
+        # Streaming output
+        "result": "Result:",
+        "images": "Images:",
+        "image_count": "{count} image(s)",
+        "search_result": "Search result: {result}...",
+        "search_images": "Search results contain {count} image(s)",
+        "tool_result": "Tool result [{name}]: {content}",
+        "unhandled_token": "Unhandled token type: {type}, content: {content}",
+        "research_stopped": "Research stopped by user",
+        "report_length": "Report content length: {length} characters",
+        "report_saved_log": "Research report saved to: {filepath}",
+        "research_failed_log": "Research failed: {error}",
+        "all_attempts_failed": "All {count} attempts failed",
+
+        # Error messages
+        "error_missing_env": "Error: Missing required environment variable {key}",
+        "error_set_env": "Please set {key} in .env file",
+
+        # Research progress
+        "researching": "Researching '{topic}'...",
+    },
+    "zh": {
+        # CLI and UI
+        "app_title": "深度研究助手",
+        "research_topic": "研究主题",
+        "topic_placeholder": "请输入您想要研究的主题",
+        "input_topic": "研究主题: ",
+        "quit_message": "感谢使用，再见！",
+        "invalid_topic": "请输入有效的研究主题。\n",
+        "existing_record": "发现已有研究记录 (状态: {status})",
+        "resume_prompt": "是否恢复继续? (y/n): ",
+        "research_in_progress": "进行中的研究:\n",
+        "updated_at": "更新于: {time}",
+        "error_label": "错误: {error}",
+        "resume_requires_topic": "恢复研究需要指定 -t topic\n",
+        "topic_not_found": "未找到主题「{topic}」的研究记录，开始新研究\n",
+        "starting_research": "研究主题: {topic}\n",
+        "resuming_from": "从上次中断处继续 (状态: {status})\n",
+        "research_interrupted": "研究被中断或无内容\n",
+        "report_saved": "研究报告已保存至: {filepath}\n",
+        "research_failed": "研究失败: {error}\n",
+        "use_resume_hint": "研究失败，可使用 --resume 恢复: python deep_research_agent.py -t \"{topic}\" --resume\n",
+        "program_interrupted": "程序被中断，感谢使用，再见！\n",
+        "output_dir": "报告输出目录",
+        "resume_help": "恢复之前的研究",
+        "list_help": "列出进行中的研究",
+
+        # Streaming output
+        "result": "结果:",
+        "images": "图片:",
+        "image_count": "{count} 张",
+        "search_result": "搜索结果: {result}...",
+        "search_images": "搜索结果含 {count} 张图片",
+        "tool_result": "工具结果 [{name}]: {content}",
+        "unhandled_token": "未处理的token类型: {type}, 内容: {content}",
+        "research_stopped": "研究被用户中断",
+        "report_length": "报告内容长度: {length} 字符",
+        "report_saved_log": "研究报告已保存至: {filepath}",
+        "research_failed_log": "研究失败: {error}",
+        "all_attempts_failed": "所有 {count} 次尝试均失败",
+
+        # Error messages
+        "error_missing_env": "错误: 缺少必需的环境变量 {key}",
+        "error_set_env": "请在 .env 文件中设置 {key}",
+
+        # Research progress
+        "researching": "正在研究「{topic}」...",
+
+        # Status
+        "status_running": "running",
+        "status_completed": "completed",
+        "status_failed": "failed",
+
+        # Research prompt
+        "prompt_request": "请帮我研究以下主题并撰写完整的研究报告。报告语言必须与用户输入语言保持一致：{topic}",
+    }
+}
+
+
+def t(key: str, **kwargs) -> str:
+    """Get translated string for current system language.
+
+    Args:
+        key: The i18n key to look up
+        **kwargs: Format arguments for the string
+
+    Returns:
+        The translated string, or the key itself if not found
+    """
+    lang_dict = I18N.get(SYSTEM_LANG, I18N["en"])
+    template = lang_dict.get(key, I18N["en"].get(key, key))
+    if kwargs:
+        try:
+            return template.format(**kwargs)
+        except (KeyError, ValueError):
+            return template
+    return template
+
 
 def get_required_env(key: str) -> str:
     """Get required environment variable or exit with clear message.
@@ -47,8 +231,8 @@ def get_required_env(key: str) -> str:
     """
     value = os.environ.get(key)
     if not value:
-        print(f"错误: 缺少必需的环境变量 {key}", file=sys.stderr)
-        print(f"请在 .env 文件中设置 {key}", file=sys.stderr)
+        print(t("error_missing_env", key=key), file=sys.stderr)
+        print(t("error_set_env", key=key), file=sys.stderr)
         sys.exit(1)
     return value
 
@@ -136,7 +320,7 @@ def setup_logging():
         format="%(asctime)s - %(levelname)s - %(message)s",
         handlers=[
             rotate_handler,
-            # 移除 StreamHandler，避免日志重复输出到终端
+            # Remove StreamHandler to avoid duplicate logging to console
         ],
     )
     return logging.getLogger(__name__)
@@ -196,25 +380,25 @@ Write a professional research report with the following structure:
 
 # [Research Topic]
 
-## 摘要
+## Summary
 Brief overview of the research topic and key findings.
 
-## 1. 研究背景
+## 1. Background
 Background and context of the topic.
 
-## 2. 核心概念
+## 2. Key Concepts
 Definition and explanation of key concepts.
 
-## 3. 主要发现
+## 3. Main Findings
 Key findings from your research.
 
-## 4. 分析与讨论
+## 4. Analysis and Discussion
 In-depth analysis and discussion.
 
-## 5. 结论
+## 5. Conclusion
 Summary and conclusions.
 
-## 参考文献
+## References
 List all sources referenced during research.
 
 Ensure the report is comprehensive, well-structured, and academically rigorous.
@@ -307,7 +491,7 @@ def run_with_logging(topic: str, resume: bool = False):
         The generated research report as a Markdown string,
         or empty string if interrupted.
     """
-    print(f"\n{CYAN}正在研究「{topic}」...{RESET}\n")
+    print(f"\n{CYAN}{t('researching', topic=topic)}{RESET}\n")
 
     topic_state = state.get_topic_state(topic) if resume else None
 
@@ -317,7 +501,7 @@ def run_with_logging(topic: str, resume: bool = False):
             [
                 {
                     "role": "user",
-                    "content": f"请帮我研究以下主题并撰写完整的研究报告：{topic}",
+                    "content": t( "prompt_request", topic=topic),
                 }
             ],
         )
@@ -325,7 +509,7 @@ def run_with_logging(topic: str, resume: bool = False):
         else [
             {
                 "role": "user",
-                "content": f"请帮我研究以下主题并撰写完整的研究报告：{topic}",
+                "content": t( "prompt_request", topic=topic),
             }
         ]
     )
@@ -360,7 +544,7 @@ def run_with_logging(topic: str, resume: bool = False):
                         if tc.get("name"):
                             tool_name = tc['name']
                             print(f"\n{source_color}[{source}]{RESET} {BOLD}{GREEN}>> {tool_name}{RESET}")
-                            logger.info(f"[{source}] 调用工具: {tool_name}")
+                            logger.info(f"[{source}] Calling tool: {tool_name}")
                         if tc.get("args"):
                             args_str = str(tc["args"])[:150]
                             print(f"    {DIM}{args_str}{RESET}", end="", flush=True)
@@ -407,17 +591,17 @@ def run_with_logging(topic: str, resume: bool = False):
                     if result_data:
                         if "query" in result_data:
                             query = result_data['query'][:60]
-                            print(f"\n{source_color}[{source}]{RESET} {YELLOW}🔍 搜索:{RESET} {query}")
-                            logger.info(f"[{source}] 搜索: {result_data['query']}")
+                            print(f"\n{source_color}[{source}]{RESET} {YELLOW}🔍 Search:{RESET} {query}")
+                            logger.info(f"[{source}] Search: {result_data['query']}")
                         if "answer" in result_data and result_data["answer"]:
                             answer = str(result_data["answer"])[:200]
-                            print(f"    {GREEN}✓ 结果:{RESET} {DIM}{answer}...{RESET}")
-                            logger.info(f"[{source}] 搜索结果: {answer[:100]}...")
+                            print(f"    {GREEN}✓ {t('result')}{RESET} {DIM}{answer}...{RESET}")
+                            logger.info(f"[{source}] {t('search_result', result=answer[:100])}")
                         elif "images" in result_data:
                             img_count = len(result_data.get("images", []))
                             if img_count != 0:
-                                print(f"    {GREEN}✓ 图片:{RESET} {img_count} 张")
-                                logger.info(f"[{source}] 搜索结果含 {img_count} 张图片")
+                                print(f"    {GREEN}✓ {t('images')}{RESET} {t('image_count', count=img_count)}")
+                                logger.info(f"[{source}] {t('search_images', count=img_count)}")
                     else:
                         if "error" in content.lower() or "fail" in content.lower():
                             truncated = content[:150] + "..." if len(content) > 150 else content
@@ -425,7 +609,7 @@ def run_with_logging(topic: str, resume: bool = False):
                         else:
                             truncated = content[:100] + "..." if len(content) > 100 else content
                             print(f"\n{source_color}[{source}]{RESET} {DIM}[T] {tool_name}:{RESET} {truncated}")
-                        logger.info(f"[{source}] 工具结果 [{tool_name}]: {content[:200]}")
+                        logger.info(f"[{source}] {t('tool_result', name=tool_name, content=content[:200])}")
                 elif token.type == "AIMessageChunk" and token.content:
                     content = token.content
 
@@ -466,11 +650,11 @@ def run_with_logging(topic: str, resume: bool = False):
                 else:
                     if hasattr(token, 'type'):
                         content_preview = str(token.content)[:50] if token.content else "None"
-                        logger.debug(f"[{source}] 未处理的token类型: {token.type}, 内容: {content_preview}")
+                        logger.debug(f"[{source}] {t('unhandled_token', type=token.type, content=content_preview)}")
 
     except KeyboardInterrupt:
-        print("\n\n研究被用户中断")
-        logger.info("研究被用户中断")
+        print("\n\n" + t("research_stopped"))
+        logger.info(t("research_stopped"))
         # Return what we have so far
         final_report = "".join(report_parts)
         # Remove thinking content
@@ -487,7 +671,7 @@ def run_with_logging(topic: str, resume: bool = False):
         first_heading = final_report.find("# ")
         if first_heading > 0:
             before_heading = final_report[:first_heading].strip()
-            intro_keywords = ["我将为您", "让我先", "以下是", "根据您", "研究主题"]
+            intro_keywords = ["我将为您", "让我先", "以下是", "根据您", "研究主题", "I will", "Let me", "Here is", "Based on your", "Research topic"]
             if any(kw in before_heading for kw in intro_keywords):
                 final_report = final_report[first_heading:].strip()
         return final_report
@@ -527,11 +711,11 @@ def run_with_logging(topic: str, resume: bool = False):
         before_heading = final_report[:first_heading].strip()
         # If content before heading looks like intro/boilerplate, remove it
         # Keywords that indicate it's not part of the report
-        intro_keywords = ["我将为您", "让我先", "以下是", "根据您", "研究主题"]
+        intro_keywords = ["我将为您", "让我先", "以下是", "根据您", "研究主题", "I will", "Let me", "Here is", "Based on your", "Research topic"]
         if any(kw in before_heading for kw in intro_keywords):
             final_report = final_report[first_heading:].strip()
 
-    logger.info(f"报告内容长度: {len(final_report)} 字符")
+    logger.info(t("report_length", length=len(final_report)))
     return final_report
 
 
@@ -557,7 +741,7 @@ def run_research(topic: str, output_dir: str = "reports", resume: bool = False):
         report = run_with_logging(topic, resume=resume)
 
         if not report:
-            print("\n\n研究被中断或无内容\n")
+            print("\n\n" + t("research_interrupted"))
             return False
 
         # Only add title if report doesn't have one
@@ -570,15 +754,15 @@ def run_research(topic: str, output_dir: str = "reports", resume: bool = False):
         filepath = save_report(topic, report, output_dir, title=extracted_title)
         state.save_topic_progress(topic, "completed")
 
-        logger.info(f"研究报告已保存至: {filepath}")
-        print(f"\n\n研究报告已保存至: {filepath}\n")
+        logger.info(t("report_saved_log", filepath=filepath))
+        print("\n\n" + t("report_saved", filepath=filepath))
         return True
 
     except Exception as e:
         error_msg = str(e)
-        logger.error(f"研究失败: {error_msg}")
+        logger.error(t("research_failed_log", error=error_msg))
         state.save_topic_progress(topic, "failed", error=error_msg)
-        print(f"\n\n研究失败: {error_msg}\n")
+        print("\n\n" + t("research_failed", error=error_msg))
         return False
 
 
@@ -616,7 +800,7 @@ def retry_with_backoff(func, max_retries: int = 3, initial_delay: float = 5.0):
                 time.sleep(delay)
                 delay *= 2
             else:
-                logger.error(f"All {max_retries} attempts failed")
+                logger.error(t("all_attempts_failed", count=max_retries))
 
     raise last_error
 
@@ -753,72 +937,70 @@ def main():
         - Resume mode: Continue previous research via --resume
     """
     parser = argparse.ArgumentParser(description="Deep Research Agent")
-    parser.add_argument("-t", "--topic", type=str, help="研究主题")
+    parser.add_argument("-t", "--topic", type=str, help=t("research_topic"))
     parser.add_argument(
-        "-o", "--output", type=str, default="reports", help="报告输出目录"
+        "-o", "--output", type=str, default="reports", help=t("output_dir")
     )
-    parser.add_argument("--resume", action="store_true", help="恢复之前的研究")
-    parser.add_argument("--list", action="store_true", help="列出进行中的研究")
+    parser.add_argument("--resume", action="store_true", help=t("resume_help"))
+    parser.add_argument("--list", action="store_true", help=t("list_help"))
     args = parser.parse_args()
 
     print("=" * 60)
-    print("          Deep Research Agent")
+    print(f"          {t('app_title')}")
     print("=" * 60)
 
     if args.list:
-        print("\n进行中的研究:\n")
+        print("\n" + t("research_in_progress"))
         for safe_topic, topic_data in state.state.get("topics", {}).items():
             status = topic_data.get("status", "unknown")
             updated = topic_data.get("updated_at", "N/A")
             topic = topic_data.get("topic", safe_topic)
             error = topic_data.get("error", "")
             print(f"  [{status}] {topic}")
-            print(f"         更新于: {updated}")
+            print(f"         {t('updated_at', time=updated)}")
             if error:
-                print(f"         错误: {error[:100]}...")
+                print(f"         {t('error_label', error=error[:100])}...")
             print()
         return
 
     if args.resume:
         if not args.topic:
-            print("恢复研究需要指定 -t topic\n")
+            print(t("resume_requires_topic"))
             return
         if not state.has_topic(args.topic):
-            print(f"未找到主题「{args.topic}」的研究记录，开始新研究\n")
+            print(t("topic_not_found", topic=args.topic))
             args.resume = False
 
     if args.topic:
         topic = args.topic
-        print(f"\n研究主题: {topic}\n")
+        print("\n" + t("starting_research", topic=topic))
 
         if args.resume:
             topic_state = state.get_topic_state(topic)
-            print(f"从上次中断处继续 (状态: {topic_state.get('status', 'unknown')})\n")
+            print(t("resuming_from", status=topic_state.get('status', 'unknown')))
 
         success = run_research(topic, args.output, resume=args.resume)
 
         if not success:
-            print(
-                f'\n研究失败，可使用 --resume 恢复: python deep_research_agent.py -t "{topic}" --resume\n'
-            )
+            print(t("use_resume_hint", topic=topic))
 
     else:
-        print("\n请输入您想要研究的主题，输入 'quit' 退出程序。\n")
+        print("\n" + t("topic_placeholder") + " ('quit' to exit)\n")
         try:
             while True:
-                topic = input("研究主题: ").strip()
+                topic = input(t("input_topic")).strip()
                 if topic.lower() == "quit":
-                    print("\n感谢使用，再见！")
+                    print("\n" + t("quit_message"))
                     break
                 if not topic:
-                    print("请输入有效的研究主题。\n")
+                    print(t("invalid_topic"))
                     continue
 
                 if state.has_topic(topic):
                     topic_state = state.get_topic_state(topic)
                     status = topic_state.get("status", "unknown")
-                    print(f"发现已有研究记录 (状态: {status})")
-                    resume = input("是否恢复继续? (y/n): ").strip().lower() == "y"
+                    print(t("existing_record", status=status))
+                    resume = input(t("resume_prompt")).strip().lower() == "y"
                 else:
                     resume = False
 
@@ -827,12 +1009,10 @@ def main():
                 if success:
                     print("-" * 60 + "\n")
                 else:
-                    print(
-                        f'\n研究失败，可使用 --resume 恢复: python deep_research_agent.py -t "{topic}" --resume\n'
-                    )
+                    print(t("use_resume_hint", topic=topic))
                     print("-" * 60 + "\n")
         except KeyboardInterrupt:
-            print("\n\n程序被中断，感谢使用，再见！\n")
+            print("\n\n" + t("program_interrupted"))
 
 
 if __name__ == "__main__":
