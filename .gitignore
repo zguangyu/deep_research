@@ -5,3 +5,5 @@ reports/
 __pycache__/
 *.pyc
 *.log
+deep_research_agent.egg-info/
+*.egg-info/

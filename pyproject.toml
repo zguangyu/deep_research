@@ -1,0 +1,29 @@
+[project]
+name = "deep-research-agent"
+version = "0.1.0"
+description = "AI-powered research agent that generates Chinese reports via web search and LLM"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "tavily>=0.2.0",
+    "deepagents>=0.1.0",
+    "langchain-openai>=0.1.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.1.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E501"]
