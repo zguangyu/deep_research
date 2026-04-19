@@ -1,3 +1,15 @@
+"""
+Deep Research Agent - AI-powered research tool for generating Chinese reports.
+
+This module provides an AI research agent that uses web search (Tavily) and
+large language models (Minimax M2.7) to research topics and generate
+comprehensive reports in Chinese. Features include streaming output,
+research state persistence, and automatic retry with exponential backoff.
+
+Example:
+    python deep_research_agent.py -t "人工智能发展趋势"
+"""
+
 import os
 import re
 import json
@@ -18,7 +30,21 @@ dotenv.load_dotenv()
 
 
 def get_required_env(key: str) -> str:
-    """Get required environment variable or exit with clear message."""
+    """Get required environment variable or exit with clear message.
+
+    Retrieves an environment variable and terminates the program with
+    an error message if the variable is not set.
+
+    Args:
+        key: The name of the environment variable to retrieve.
+
+    Returns:
+        The value of the environment variable.
+
+    Raises:
+        SystemExit: If the environment variable is not set, prints
+            error message and exits with code 1.
+    """
     value = os.environ.get(key)
     if not value:
         print(f"错误: 缺少必需的环境变量 {key}", file=sys.stderr)
@@ -28,9 +54,28 @@ def get_required_env(key: str) -> str:
 
 
 def _get_tavily_client() -> TavilyClient:
+    """Create and return a new TavilyClient instance.
+
+    Initializes a Tavily search client using the API key from
+    environment variables.
+
+    Returns:
+        A new TavilyClient instance configured with the API key.
+
+    Raises:
+        SystemExit: If TAVILY_API_KEY environment variable is not set.
+    """
     return TavilyClient(api_key=get_required_env("TAVILY_API_KEY"))
 
 def _get_model() -> ChatOpenAI:
+    """Create and return a new ChatOpenAI model instance.
+
+    Initializes a ChatOpenAI client configured for Minimax M2.7
+    with settings from environment variables.
+
+    Returns:
+        A new ChatOpenAI instance configured with model name and base URL.
+    """
     return ChatOpenAI(
         model=os.environ.get("OPENAI_MODEL_NAME", "Minimax-M2.7"),
         base_url=os.environ.get("OPENAI_BASE_URL", "https://api.minimaxi.com/v1")
@@ -41,12 +86,28 @@ _tavily_client: TavilyClient | None = None
 _model: ChatOpenAI | None = None
 
 def get_tavily_client() -> TavilyClient:
+    """Get the singleton TavilyClient instance.
+
+    Returns a cached TavilyClient instance, creating it on the first call.
+    Uses lazy initialization to delay client creation until needed.
+
+    Returns:
+        The singleton TavilyClient instance.
+    """
     global _tavily_client
     if _tavily_client is None:
         _tavily_client = _get_tavily_client()
     return _tavily_client
 
 def get_model() -> ChatOpenAI:
+    """Get the singleton ChatOpenAI model instance.
+
+    Returns a cached ChatOpenAI instance, creating it on the first call.
+    Uses lazy initialization to delay model creation until needed.
+
+    Returns:
+        The singleton ChatOpenAI instance.
+    """
     global _model
     if _model is None:
         _model = _get_model()
@@ -57,6 +118,16 @@ LOG_FILE = "research.log"
 
 
 def setup_logging():
+    """Configure and return a logger with rotating file handler.
+
+    Sets up logging to write to 'research.log' with rotation at 10MB,
+    keeping 5 backup files. Log format includes timestamp, level,
+    and message. Only logs to file, not to console to avoid
+    duplicate output.
+
+    Returns:
+        A logger instance configured with rotating file handler.
+    """
     rotate_handler = logging.handlers.RotatingFileHandler(
         LOG_FILE, maxBytes=10_485_760, backupCount=5, encoding="utf-8"
     )
@@ -80,7 +151,24 @@ def internet_search(
     topic: Literal["general", "news", "finance"] = "general",
     include_raw_content: bool = False,
 ):
-    """Run a web search"""
+    """Run a web search using Tavily search API.
+
+    Performs an internet search with configurable parameters
+    and returns search results including relevant URLs and snippets.
+
+    Args:
+        query: The search query string to look up.
+        max_results: Maximum number of search results to return.
+            Defaults to 5.
+        topic: The topic category for the search. Valid values
+            are "general", "news", or "finance". Defaults to "general".
+        include_raw_content: Whether to include raw content from
+            search sources. Defaults to False.
+
+    Returns:
+        A dictionary containing search results with keys such as
+        'query', 'results', and optionally 'images' and 'answer'.
+    """
     return get_tavily_client().search(
         query,
         max_results=max_results,
@@ -143,7 +231,19 @@ def create_research_agent(topic: str):
 
 
 def extract_title(content: str) -> str:
-    """Extract title from the first # heading in the report content."""
+    """Extract title from the first Markdown heading in report content.
+
+    Parses the content to find the first line starting with '# '
+    (Markdown H1 heading) and returns the title text. The title
+    is sanitized for use in filenames by removing special characters.
+
+    Args:
+        content: The Markdown content to extract title from.
+
+    Returns:
+        The extracted and sanitized title string, or an empty
+        string if no heading is found. Maximum 50 characters.
+    """
     # Find first # heading
     match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
     if match:
@@ -155,7 +255,21 @@ def extract_title(content: str) -> str:
 
 
 def save_report(topic: str, content: str, output_dir: str = "reports", title: str = None) -> str:
-    """Save report to file with timestamp."""
+    """Save report content to a file with timestamp in the filename.
+
+    Creates the output directory if it doesn't exist, sanitizes the
+    topic for use in filename, and saves the content with a timestamp.
+    The filename format is: sanitized_topic_timestamp.md
+
+    Args:
+        topic: The research topic, used as part of the filename.
+        content: The Markdown content to save to the file.
+        output_dir: Directory path to save the report. Defaults to "reports".
+        title: Optional custom title, otherwise extracted from content.
+
+    Returns:
+        The full path to the saved report file.
+    """
     os.makedirs(output_dir, exist_ok=True)
     # Use provided title or generate one
     safe_title = re.sub(r"[<>:\"/\\|?*]", "", (title or topic))[:50]
@@ -178,6 +292,21 @@ DIM = "\033[2m"
 
 
 def run_with_logging(topic: str, resume: bool = False):
+    """Run the research agent with streaming output and logging.
+
+    Creates a research agent for the given topic and runs it while
+    streaming the output to the console and logging to file. Handles
+    interruption gracefully and cleans up the report content.
+
+    Args:
+        topic: The research topic to investigate.
+        resume: Whether to resume from previous research state.
+            Defaults to False.
+
+    Returns:
+        The generated research report as a Markdown string,
+        or empty string if interrupted.
+    """
     print(f"\n{CYAN}正在研究「{topic}」...{RESET}\n")
 
     topic_state = state.get_topic_state(topic) if resume else None
@@ -407,6 +536,21 @@ def run_with_logging(topic: str, resume: bool = False):
 
 
 def run_research(topic: str, output_dir: str = "reports", resume: bool = False):
+    """Run complete research flow for a topic and save the report.
+
+    Orchestrates the research process: saves topic progress, runs the
+    agent with logging, extracts title, saves the report to file,
+    and updates the topic status.
+
+    Args:
+        topic: The research topic to investigate.
+        output_dir: Directory to save the report. Defaults to "reports".
+        resume: Whether to resume from previous state. Defaults to False.
+
+    Returns:
+        True if research completed and report was saved successfully,
+        False otherwise.
+    """
     state.save_topic_progress(topic, "running")
 
     try:
@@ -439,6 +583,24 @@ def run_research(topic: str, output_dir: str = "reports", resume: bool = False):
 
 
 def retry_with_backoff(func, max_retries: int = 3, initial_delay: float = 5.0):
+    """Retry a function with exponential backoff on failure.
+
+    Executes the provided function up to max_retries times, doubling
+    the delay after each failed attempt. Logs warning messages for
+    each retry and error message when all attempts fail.
+
+    Args:
+        func: The function to execute. Should not require arguments.
+        max_retries: Maximum number of retry attempts. Defaults to 3.
+        initial_delay: Initial wait time in seconds before first retry.
+            Defaults to 5.0.
+
+    Returns:
+        The return value of func if successful.
+
+    Raises:
+        Exception: The last exception that occurred if all retries fail.
+    """
     delay = initial_delay
     last_error = None
 
@@ -460,11 +622,36 @@ def retry_with_backoff(func, max_retries: int = 3, initial_delay: float = 5.0):
 
 
 class ResearchState:
+    """Manages research state persistence across sessions.
+
+    Handles loading, saving, and querying research state including
+    topic status, error messages, and conversation history for
+    resuming interrupted research. State is persisted to a JSON file.
+
+    Attributes:
+        state_file: Path to the JSON file storing research state.
+        state: Dictionary containing all persisted state data.
+    """
+
     def __init__(self, state_file: str = STATE_FILE):
+        """Initialize ResearchState with file path and load existing state.
+
+        Args:
+            state_file: Path to the state JSON file. Defaults to STATE_FILE.
+        """
         self.state_file = state_file
         self.state: dict = self._load()
 
     def _load(self) -> dict:
+        """Load state from JSON file or return default state.
+
+        Attempts to read and parse the state file. If the file is
+        missing, corrupted, or contains invalid data, returns a
+        default empty state and logs a warning.
+
+        Returns:
+            A dictionary containing the loaded state or default state.
+        """
         default_state = {"topics": {}, "last_updated": None, "version": 1}
         if os.path.exists(self.state_file):
             try:
@@ -480,6 +667,12 @@ class ResearchState:
         return default_state
 
     def save(self):
+        """Persist current state to JSON file.
+
+        Updates the last_updated timestamp and writes the entire state
+        dictionary to the state file in UTF-8 encoding with indentation.
+        Logs an error if the write fails.
+        """
         self.state["last_updated"] = datetime.now().isoformat()
         try:
             with open(self.state_file, "w", encoding="utf-8") as f:
@@ -488,6 +681,17 @@ class ResearchState:
             logger.error(f"Failed to save state: {e}")
 
     def save_topic_progress(self, topic: str, status: str, error: str = ""):
+        """Save or update the progress status for a research topic.
+
+        Records the topic name, current status (e.g., 'running',
+        'completed', 'failed'), error message if any, and timestamp.
+        Sanitizes the topic name for safe key storage.
+
+        Args:
+            topic: The research topic name.
+            status: Current status string ('running', 'completed', 'failed').
+            error: Optional error message string. Defaults to empty string.
+        """
         safe_topic = re.sub(r"[<>:\"/\\|?*]", "", topic)
         if "topics" not in self.state:
             self.state["topics"] = {}
@@ -500,10 +704,34 @@ class ResearchState:
         self.save()
 
     def get_topic_state(self, topic: str) -> dict | None:
+        """Retrieve the state data for a specific topic.
+
+        Looks up the topic in the state dictionary using a sanitized
+        key and returns all stored data including status, error,
+        updated_at timestamp, and conversation messages.
+
+        Args:
+            topic: The research topic name to look up.
+
+        Returns:
+            A dictionary containing topic state data if found,
+            None otherwise.
+        """
         safe_topic = re.sub(r"[<>:\"/\\|?*]", "", topic)
         return self.state.get("topics", {}).get(safe_topic)
 
     def has_topic(self, topic: str) -> bool:
+        """Check if a topic exists in the state.
+
+        Determines whether a research topic record exists by checking
+        for its sanitized key in the topics dictionary.
+
+        Args:
+            topic: The research topic name to check.
+
+        Returns:
+            True if the topic exists in state, False otherwise.
+        """
         safe_topic = re.sub(r"[<>:\"/\\|?*]", "", topic)
         return safe_topic in self.state.get("topics", {})
 
@@ -512,6 +740,18 @@ state = ResearchState()
 
 
 def main():
+    """Main entry point for the Deep Research Agent CLI.
+
+    Parses command-line arguments and either runs an interactive
+    research session, executes a single research topic, lists
+    in-progress research, or resumes previous research.
+
+    Supports the following modes:
+        - Interactive mode: Prompts for topic input
+        - Topic mode: Research a specific topic provided via -t
+        - List mode: Show all in-progress research via --list
+        - Resume mode: Continue previous research via --resume
+    """
     parser = argparse.ArgumentParser(description="Deep Research Agent")
     parser.add_argument("-t", "--topic", type=str, help="研究主题")
     parser.add_argument(
