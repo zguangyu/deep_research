@@ -9,3 +9,6 @@ deep_research_agent.egg-info/
 *.egg-info/
 research_report.md
 research_state.json
+
+.sisyphus/
+
